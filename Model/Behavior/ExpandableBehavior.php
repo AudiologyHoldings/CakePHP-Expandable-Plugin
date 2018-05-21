@@ -61,7 +61,7 @@ class ExpandableBehavior extends ModelBehavior {
 
 	public $defaults = array(
 		// if a value is an array or object we can encode/decode via: json
-		'encode_json' => true,
+		'encode_json' => false,
 		// Ignore all of these fields (never save them) security like whoa!
 		'restricted_keys' => array(),
 		// CSV strings are awesome -- they let us look FIND_IN_SET() in mysql
@@ -297,13 +297,11 @@ class ExpandableBehavior extends ModelBehavior {
 		if ($value == 'null') {
 			return null;
 		}
-		# Work around for php behavior:  json_decode("01234") -> 1234.  Losing the leading zero value even if it's a string.
-		if (is_string($value) && preg_match('/^0\d+$/', $value)) {
-			return $value;
-		}
-		$decoded = @json_decode($value, true);
-		if ($decoded != null) {
-			return $decoded;
+		if (is_string($value) && (substr($value, 0, 1) == '{'  || substr($value, 0, 1) == '[')) {
+			$decoded = @json_decode($value, true);
+			if ($decoded != null) {
+				return $decoded;
+			}
 		}
 		return $value;
 	}
