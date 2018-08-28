@@ -8,7 +8,7 @@ App::uses('AppModel', 'Model');
 /**
  * User test Model class class
  */
-class User extends AppModel {
+class ExpandableUser extends AppModel {
 	public $name = 'User';
 	public $actsAs = array(
 		'Expandable.Expandable' => array(
@@ -49,7 +49,7 @@ class ExpandableBehaviorTest extends CakeTestCase {
 	 */
 	public function setUp() {
 		parent::setUp();
-		$this->User = ClassRegistry::init('Expandable.User');
+		$this->User = ClassRegistry::init('Expandable.ExpandableUser');
 		$this->User->Behaviors->attach('Expandable.Expandable');
 	}
 
