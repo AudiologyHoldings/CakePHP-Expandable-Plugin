@@ -75,8 +75,7 @@ class ExpandableBehavior extends ModelBehavior {
    	);
 
 	public $settings = array();
-
-	private $_fieldsToSave = array();
+	private $_eavData = array();
 
 	/**
 	 * Setup the model
@@ -105,7 +104,7 @@ class ExpandableBehavior extends ModelBehavior {
 	 * @return mixed $results
 	 */
 	public function afterFind(Model $Model, $results, $primary = false) {
-		$settings = (!empty($this->settings[$Model->alias]) ? $this->settings[$Model->alias] : array());
+		$settings = $this->settings[$Model->alias] ?? [];
 		if (!empty($settings['with'])) {
 			$with = $settings['with'];
 			if (!Hash::check($results, '{n}.' . $with)) {
@@ -119,62 +118,112 @@ class ExpandableBehavior extends ModelBehavior {
 				}
 			}
 		}
-		return $results;
 	}
 
 	/**
-	 * Standard beforeSave() callback
-	 * Sets up what data will be saved for expandable
-	 *
-	 * @param object Model $Model
+	 * Shared method to prepare EAV (Entity-Attribute-Value) data
+	 * @access protected
+	 * @param Model $Model
+	 * @return array
+	 */
+	protected function _prepareEavData(Model $Model) : array
+	{
+		$settings = $this->settings[$Model->alias] ?? [];
+		if (!isset($settings['schema'])) {
+			return [];
+		}
+
+		$fieldsToSave = array_diff_key($Model->data[$Model->alias], $settings['schema']);
+		if (empty($fieldsToSave)) {
+			return [];
+		}
+
+		// Get the configured restricted keys and ignore all associated models
+		$restricted_keys = array_merge(
+			$settings['restricted_keys'],
+			array_keys($Model->belongsTo),
+			array_keys($Model->hasOne),
+			array_keys($Model->hasMany),
+			array_keys($Model->hasAndBelongsToMany)
+		);
+
+		$eavData = [];
+		foreach ($fieldsToSave as $key => $val) {
+			// Skip restricted keys
+			if (in_array($key, $restricted_keys, true)) {
+				continue;
+			}
+
+			$eavData[] = [
+				'key' => $key,
+				'value' => $this->encode($Model, $val, $key)
+			];
+		}
+
+		return $eavData;
+	}
+
+	/**
+	 * Validate EAV (Entity-Attribute-Value) data
+	 * @access public
+	 * @param Model $Model
+	 * @param array $options
 	 * @return boolean
 	 */
-	public function beforeSave(Model $Model, $options = array()) {
-		$settings = (!empty($this->settings[$Model->alias]) ? $this->settings[$Model->alias] : array());
-		if (isset($settings['schema'])) {
-			$this->_fieldsToSave = array_diff_key($Model->data[$Model->alias], $settings['schema']);
+	public function beforeValidate(Model $Model, $options = []) : bool
+	{
+		$this->_eavData ??= $this->_prepareEavData($Model);
+		if (empty($this->_eavData)) {
+			return true;
+		}
+
+		// Validate the prepared EAV data
+		$with = $this->settings[$Model->alias]['with'];
+		$Model->{$with}->set($this->_eavData);
+		if (!$Model->{$with}->validates()) {
+			foreach ($Model->{$with}->validationErrors as $field => $errors) {
+				$Model->validationErrors[$with . '.' . $field] = $errors;
+			}
 		}
 		return true;
 	}
-	
+
 	/**
-	 * Standard afterSave() callback
-	 * Actually save the expandable data (one record for each fieldsToSave)
-	 *
-	 * @param object Model $Model
+	 * Save EAV (Entity-Attribute-Value) data
+	 * @access public
+	 * @param Model $Model
 	 * @param boolean $created
+	 * @param array $options
 	 * @return boolean
 	 */
-	public function afterSave(Model $Model, $created, $options = array()) {
-		$settings = (!empty($this->settings[$Model->alias]) ? $this->settings[$Model->alias] : array());
-		if (!empty($settings['with']) && !empty($this->_fieldsToSave)) {
+	public function afterSave(Model $Model, $created, $options = [])
+	{
+		// If validation was skipped, prepare data now
+		if (empty($this->_eavData)) {
+			$this->_eavData = $this->_prepareEavData($Model);
+		}
+
+		$settings = $this->settings[$Model->alias] ?? [];
+		if (!empty($settings['with']) && !empty($this->_eavData)) {
 			$with = $settings['with'];
 			$assoc = $Model->hasMany[$with];
 			$foreignKey = $assoc['foreignKey'];
 			$id = $Model->id;
-			// set of "keys" we will ignore
-			$restricted_keys = $settings['restricted_keys'];
-			// automatically ignore all associated models
-			$restricted_keys = array_merge($restricted_keys, array_keys($Model->belongsTo));
-			$restricted_keys = array_merge($restricted_keys, array_keys($Model->hasOne));
-			$restricted_keys = array_merge($restricted_keys, array_keys($Model->hasMany));
-			$restricted_keys = array_merge($restricted_keys, array_keys($Model->hasAndBelongsToMany));
-			foreach ($this->_fieldsToSave as $key => $val) {
-				if (in_array($key, $restricted_keys, true)) {
-					continue;
-				}
+
+			foreach ($this->_eavData as $data) {
 				$fieldId = $Model->{$with}->field('id', array(
 					$with . '.' . $foreignKey => $id,
-					$with . '.key' => $key
+					$with . '.key' => $data['key']
 				));
-				$data = array('value' => $this->encode($Model, $val, $key));
+
 				if (!empty($fieldId)) {
 					$Model->{$with}->id = $fieldId;
 				} else {
 					$Model->{$with}->create();
 				}
+
+				// The data is already structured correctly with key and value
 				$data[$foreignKey] = $id;
-				$data['key'] = $key;
 				$saved = $Model->{$with}->save($data);
 			}
 			return true;
