@@ -75,7 +75,7 @@ class ExpandableBehavior extends ModelBehavior {
    	);
 
 	public $settings = array();
-	private $_eavData = array();
+	private $_eavData;
 
 	/**
 	 * Setup the model
@@ -177,14 +177,27 @@ class ExpandableBehavior extends ModelBehavior {
 			return true;
 		}
 
-		// Validate the prepared EAV data
 		$with = $this->settings[$Model->alias]['with'];
-		$Model->{$with}->set($this->_eavData);
-		if (!$Model->{$with}->validates()) {
-			foreach ($Model->{$with}->validationErrors as $field => $errors) {
-				$Model->validationErrors[$with . '.' . $field] = $errors;
+		foreach ($this->_eavData as $data) {
+			$Model->{$with}->create();
+			$Model->{$with}->set($data);
+
+			// We are only validating the 'value' field here due to validation messaging on
+			// other fields potentially causing confusion for end users, and also to
+			// better simulate the typical validation messaging that would be seen if the
+			// Expandable field was an actual field on the base model.
+			if (!$Model->{$with}->validates(['fieldList' => ['value']])) {
+				foreach ($Model->{$with}->validationErrors as $field => $errorMessages) {
+					$Model->validationErrors[$Model->alias . '.' . $data['key']] = $errorMessages;
+				}
 			}
+
+			// Clean up the model state
+			$Model->{$with}->create();
+			$Model->{$with}->validationErrors = [];
+			$Model->{$with}->invalidFields = [];
 		}
+
 		return true;
 	}
 
