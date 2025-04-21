@@ -104,7 +104,7 @@ class ExpandableBehavior extends ModelBehavior {
 	 * @return mixed $results
 	 */
 	public function afterFind(Model $Model, $results, $primary = false) {
-		$settings = $this->settings[$Model->alias] ?? [];
+		$settings = (!empty($this->settings[$Model->alias]) ? $this->settings[$Model->alias] : array());
 		if (!empty($settings['with'])) {
 			$with = $settings['with'];
 			if (!Hash::check($results, '{n}.' . $with)) {
@@ -118,6 +118,7 @@ class ExpandableBehavior extends ModelBehavior {
 				}
 			}
 		}
+		return $results;
 	}
 
 	/**
