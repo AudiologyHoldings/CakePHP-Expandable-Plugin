@@ -168,17 +168,19 @@ class ExpandableBehavior extends ModelBehavior {
 	 * Validate EAV (Entity-Attribute-Value) data
 	 * @access public
 	 * @param Model $Model
-	 * @param array $options
 	 * @return boolean
 	 */
-	public function beforeValidate(Model $Model, $options = []) : bool
+	public function afterValidate(Model $Model) : bool
 	{
-		$this->_eavData ??= $this->_prepareEavData($Model);
+		// Prepare and validate EAV data
+		$this->_eavData = $this->_prepareEavData($Model);
 		if (empty($this->_eavData)) {
 			return true;
 		}
 
 		$with = $this->settings[$Model->alias]['with'];
+		$expandableErrors = [];
+
 		foreach ($this->_eavData as $data) {
 			$Model->{$with}->create();
 			$Model->{$with}->set($data);
@@ -189,7 +191,8 @@ class ExpandableBehavior extends ModelBehavior {
 			// Expandable field was an actual field on the base model.
 			if (!$Model->{$with}->validates(['fieldList' => ['value']])) {
 				foreach ($Model->{$with}->validationErrors as $field => $errorMessages) {
-					$Model->validationErrors[$Model->alias . '.' . $data['key']] = $errorMessages;
+					// Store the error directly under the field name
+					$expandableErrors[$data['key']] = $errorMessages;
 				}
 			}
 
@@ -197,6 +200,14 @@ class ExpandableBehavior extends ModelBehavior {
 			$Model->{$with}->create();
 			$Model->{$with}->validationErrors = [];
 			$Model->{$with}->invalidFields = [];
+		}
+
+		// Merge expandable errors with existing validation errors under the model alias
+		if (!empty($expandableErrors)) {
+			if (!isset($Model->validationErrors[$Model->alias])) {
+				$Model->validationErrors[$Model->alias] = [];
+			}
+			$Model->validationErrors[$Model->alias] = array_merge($Model->validationErrors[$Model->alias], $expandableErrors);
 		}
 
 		return true;
