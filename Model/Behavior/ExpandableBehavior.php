@@ -204,10 +204,8 @@ class ExpandableBehavior extends ModelBehavior {
 
 		// Merge expandable errors with existing validation errors under the model alias
 		if (!empty($expandableErrors)) {
-			if (!isset($Model->validationErrors[$Model->alias])) {
-				$Model->validationErrors[$Model->alias] = [];
-			}
-			$Model->validationErrors[$Model->alias] = array_merge($Model->validationErrors[$Model->alias], $expandableErrors);
+			$Model->validationErrors = $Model->validationErrors ?? [];
+			$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
 		}
 
 		return true;
