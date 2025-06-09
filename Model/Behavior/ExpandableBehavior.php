@@ -222,9 +222,7 @@ class ExpandableBehavior extends ModelBehavior {
 	public function afterSave(Model $Model, $created, $options = [])
 	{
 		// If validation was skipped, prepare data now
-		if (empty($this->_eavData)) {
-			$this->_eavData = $this->_prepareEavData($Model);
-		}
+		$this->_eavData = $this->_eavData ?? $this->_prepareEavData($Model);
 
 		$settings = $this->settings[$Model->alias] ?? [];
 		if (!empty($settings['with']) && !empty($this->_eavData)) {
