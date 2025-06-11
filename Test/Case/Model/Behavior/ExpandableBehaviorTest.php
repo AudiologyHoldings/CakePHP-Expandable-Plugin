@@ -5,13 +5,14 @@
  */
 App::uses('Model', 'Model');
 App::uses('AppModel', 'Model');
+App::uses('ExpandableBehavior', 'Expandable.Model/Behavior');
 /**
  * User test Model class class
  */
 class ExpandableUser extends AppModel {
     public $name = 'User';
     public $actsAs = array(
-        'Expandable.Expandable' => array(
+        'Expandable.TestExpandable' => array(
             'with' => 'UserExpand',
             'encode_json' => true,
             'encode_csv' => array('states'),
@@ -26,6 +27,16 @@ class ExpandableUser extends AppModel {
     public $hasMany = array('Expandable.UserExpand');
     public $recursive = -1;
 }
+
+// This is used to more easily/thoroughly test protected ExpandableBehavior methods
+class TestExpandableBehavior extends ExpandableBehavior
+{
+    public function prepareEavData(Model $Model)
+    {
+        return $this->_prepareEavData($Model);
+    }
+}
+
 /**
  * ExpandableTest class
  *
@@ -49,8 +60,7 @@ class ExpandableBehaviorTest extends CakeTestCase {
      */
     public function setUp() {
         parent::setUp();
-        $this->User = ClassRegistry::init('Expandable.ExpandableUser');
-        $this->User->Behaviors->attach('Expandable.Expandable');
+        $this->ExpandableUser = ClassRegistry::init('Expandable.ExpandableUser');
     }
 
     /**
@@ -58,7 +68,7 @@ class ExpandableBehaviorTest extends CakeTestCase {
      *
      */
     public function tearDown() {
-        unset($this->User);
+        unset($this->ExpandableUser);
         parent::tearDown();
     }
 
@@ -68,7 +78,7 @@ class ExpandableBehaviorTest extends CakeTestCase {
      * @return void
      */
     public function testAggregateFunctionality() {
-        $user = $this->User->find('first');
+        $user = $this->ExpandableUser->find('first');
         $userInit = $user;
         $user['ExpandableUser']['extraField1'] = 'extraValue1';
         $user['ExpandableUser']['extraField2'] = true;
@@ -88,15 +98,15 @@ class ExpandableBehaviorTest extends CakeTestCase {
         $miscJsObject = array('one' =>  'One', 'two' => 'Two', 3 => 3, 4 => 4, 'true' => true, 'false' => false, 'null' => null, '');
         $user['ExpandableUser']['miscJsObject'] = $miscJsObject;
 
-        $this->User->create(false);
-        $saved = $this->User->save($user);
+        $this->ExpandableUser->create(false);
+        $saved = $this->ExpandableUser->save($user);
         $this->assertFalse(empty($saved));
         // now if we find that record again, it wont have the expands
         // because recursive = -1, and no contains
-        $userWithoutExpand = $this->User->find('first');
+        $userWithoutExpand = $this->ExpandableUser->find('first');
         $this->assertEquals($userInit, $userWithoutExpand);
         // but if we repeat the find with a contains (or recursive = 1)
-        $userWithExpand = $this->User->find('first', array('contain' => 'UserExpand'));
+        $userWithExpand = $this->ExpandableUser->find('first', array('contain' => 'UserExpand'));
         $this->assertNotEquals($userInit, $userWithExpand);
         // now we can test the values directly on the User model results
         $this->assertEquals('extraValue1', $userWithExpand['ExpandableUser']['extraField1']);
@@ -125,5 +135,103 @@ class ExpandableBehaviorTest extends CakeTestCase {
         $user['ExpandableUser']['states'] = implode(',', $user['ExpandableUser']['states']);
         unset($user['ExpandableUser']['password_confirm']);
         $this->assertEquals($user, $userWithExpand);
+    }
+
+    /**
+     * Test that prepareEavData returns the correct EAV data when valid data is present
+     *
+     * @return void
+     */
+    public function testPrepareEavDataWithValidData()
+    {
+        $this->ExpandableUser->data = [
+            'ExpandableUser' => [
+                'id' => '1',
+                'name' => 'Test',
+                'extra_field' => 'value',
+                'password' => 'secret'
+            ]
+        ];
+
+        $result = $this->ExpandableUser->Behaviors->TestExpandable->prepareEavData($this->ExpandableUser);
+
+        // Verify we only got one EAV record
+        $this->assertCount(1, $result);
+
+        // Verify the extra field was properly set
+        $this->assertEquals('extra_field', $result[0]['key']);
+        $this->assertEquals('value', $result[0]['value']);
+
+        // Verify the original data structure remains unchanged
+        $this->assertArrayHasKey('password', $this->ExpandableUser->data['ExpandableUser'], 'Original data should retain all fields');
+        $this->assertEquals('secret', $this->ExpandableUser->data['ExpandableUser']['password'], 'Original password value should be preserved');
+    }
+
+    /**
+     * Test that prepareEavData returns empty array when no EAV-eligible fields are present
+     *
+     * @return void
+     */
+    public function testPrepareEavDataWithNoExtraFields()
+    {
+        // Set up data with no extra fields
+        $this->ExpandableUser->data = [
+            'ExpandableUser' => [
+                'id' => '1',
+                'name' => 'Test'
+            ]
+        ];
+
+        // EAV data should not be returned because there are no extra fields
+        $result = $this->ExpandableUser->Behaviors->TestExpandable->prepareEavData($this->ExpandableUser);
+        $this->assertEmpty($result);
+    }
+
+    /**
+     * Test that prepareEavData properly handles associated model data.
+     * Verifies that:
+     * - Fields that are part of the schema are ignored
+     * - Associated model data is ignored
+     * - Only custom fields not in schema are included in EAV data
+     *
+     * @return void
+     */
+    public function testPrepareEavDataWithAssociatedModels()
+    {
+        // Set up data with associated models
+        $this->ExpandableUser->belongsTo = ['Category'];
+        $this->ExpandableUser->hasMany = ['Comment'];
+
+        // Set up data with associated model data
+        $this->ExpandableUser->data = [
+            'ExpandableUser' => [
+                'id' => '1',
+                'name' => 'Test',
+                'profile_id' => '123', // This should be ignored (part of schema)
+                'comment_id' => '456', // This should be ignored (part of schema)
+                'custom_field' => 'value', // This should be included (NOT part of schema)
+            ],
+            'Profile' => [ // This should be ignored
+                'id' => '2',
+                'name' => 'Test Profile'
+            ],
+            'Comment' => [ // This should be ignored
+                [
+                    'id' => '1',
+                    'text' => 'Test Comment 1'
+                ],
+                [
+                    'id' => '2',
+                    'text' => 'Test Comment 2'
+                ]
+            ]
+        ];
+
+        // EAV data should only contain custom_field because it's not part of the schema,
+        // is not restricted, and is not associated with a model
+        $result = $this->ExpandableUser->Behaviors->TestExpandable->prepareEavData($this->ExpandableUser);
+        $this->assertCount(1, $result);
+        $this->assertEquals('custom_field', $result[0]['key']);
+        $this->assertEquals('value', $result[0]['value']);
     }
 }
