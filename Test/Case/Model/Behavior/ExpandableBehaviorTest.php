@@ -234,4 +234,32 @@ class ExpandableBehaviorTest extends CakeTestCase {
         $this->assertEquals('custom_field', $result[0]['key']);
         $this->assertEquals('value', $result[0]['value']);
     }
+
+    /**
+     * Test that prepareEavData returns empty array when schema is not set in behavior settings
+     *
+     * @return void
+     */
+    public function testPrepareEavDataWithNoSchema()
+    {
+        // Set up data with extra fields
+        $this->ExpandableUser->data = [
+            'ExpandableUser' => [
+                'id' => '1',
+                'name' => 'Test',
+                'custom_field' => 'value' // Normally this would be included in EAV data
+            ]
+        ];
+
+        // Temporarily remove schema from behavior settings
+        $originalSettings = $this->ExpandableUser->Behaviors->TestExpandable->settings[$this->ExpandableUser->alias];
+        unset($this->ExpandableUser->Behaviors->TestExpandable->settings[$this->ExpandableUser->alias]['schema']);
+
+        // EAV data should not be returned because schema is not set
+        $result = $this->ExpandableUser->Behaviors->TestExpandable->prepareEavData($this->ExpandableUser);
+        $this->assertEmpty($result);
+
+        // Restore original settings
+        $this->ExpandableUser->Behaviors->TestExpandable->settings[$this->ExpandableUser->alias] = $originalSettings;
+    }
 }
