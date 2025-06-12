@@ -76,6 +76,7 @@ class ExpandableBehavior extends ModelBehavior {
 
 	public $settings = array();
 	private $_eavData;
+	private $_eavValidated = [];
 
 	/**
 	 * Setup the model
@@ -208,6 +209,9 @@ class ExpandableBehavior extends ModelBehavior {
 			$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
 		}
 
+		if (empty($expandableErrors)) {
+			$this->_eavValidated[$Model->alias] = true;
+		}
 		return true;
 	}
 
@@ -243,9 +247,16 @@ class ExpandableBehavior extends ModelBehavior {
 					$Model->{$with}->create();
 				}
 
+				// If the EAV data was already validated (see afterValidate), skip validation
+				$options = [];
+				if (!empty($this->_eavValidated[$Model->alias])) {
+					$options['validate'] = false;
+					unset($this->_eavValidated[$Model->alias]); // cleanup
+				}
+
 				// The data is already structured correctly with key and value
 				$data[$foreignKey] = $id;
-				$saved = $Model->{$with}->save($data);
+				$saved = $Model->{$with}->save($data, $options);
 			}
 			return true;
 		}
