@@ -76,7 +76,6 @@ class ExpandableBehavior extends ModelBehavior {
 
 	public $settings = array();
 	private $_eavData;
-	private $_eavValidated = [];
 
 	/**
 	 * Setup the model
@@ -180,20 +179,23 @@ class ExpandableBehavior extends ModelBehavior {
 		}
 
 		$with = $this->settings[$Model->alias]['with'];
-		$expandableErrors = [];
+		$expandableErrors = []; // Errors that result from the EAV value field
+		$metaErrors = []; // Errors that result from EAV non-value fields (i.e. key, id, etc.)
 
 		foreach ($this->_eavData as $data) {
 			$Model->{$with}->create();
 			$Model->{$with}->set($data);
 
-			// We are only validating the 'value' field here due to validation messaging on
-			// other fields potentially causing confusion for end users, and also to
-			// better simulate the typical validation messaging that would be seen if the
-			// Expandable field was an actual field on the base model.
-			if (!$Model->{$with}->validates(['fieldList' => ['value']])) {
+			// Validate all fields
+			if (!$Model->{$with}->validates()) {
 				foreach ($Model->{$with}->validationErrors as $field => $errorMessages) {
-					// Store the error directly under the field name
-					$expandableErrors[$data['key']] = $errorMessages;
+					if ($field === 'value') {
+						// Value field errors appear as virtual columns on the base model
+						$expandableErrors[$data['key']] = $errorMessages;
+					} else {
+						// Meta field errors are collected separately
+						$metaErrors[$data['key']][$field] = $errorMessages;
+					}
 				}
 			}
 
@@ -203,14 +205,31 @@ class ExpandableBehavior extends ModelBehavior {
 			$Model->{$with}->invalidFields = [];
 		}
 
-		// Merge expandable errors with existing validation errors under the model alias
-		if (!empty($expandableErrors)) {
-			$Model->validationErrors = $Model->validationErrors ?? [];
-			$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
-		}
+		// If we have any errors, we need to handle them
+		if (!empty($expandableErrors) || !empty($metaErrors)) {
+			// Merge virtual column errors with base model errors
+			if (!empty($expandableErrors)) {
+				$Model->validationErrors = $Model->validationErrors ?? [];
+				$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
+			}
 
-		if (empty($expandableErrors)) {
-			$this->_eavValidated[$Model->alias] = true;
+			// Log meta errors for debugging/administration
+			if (!empty($metaErrors)) {
+				AppLog::error(
+					sprintf(
+						'ExpandableBehavior meta validation errors for %s: %s',
+						$Model->alias,
+						json_encode($metaErrors)
+					),
+					['context' => 'expandable']
+				);
+
+				// Add a generic error message for the user
+				$Model->validationErrors['_system'] = [
+					'An unexpected error occurred. Please contact support if this persists.'
+				];
+			}
+			return false;
 		}
 		return true;
 	}
@@ -247,16 +266,13 @@ class ExpandableBehavior extends ModelBehavior {
 					$Model->{$with}->create();
 				}
 
-				// If the EAV data was already validated (see afterValidate), skip validation
-				$options = [];
-				if (!empty($this->_eavValidated[$Model->alias])) {
-					$options['validate'] = false;
-					unset($this->_eavValidated[$Model->alias]); // cleanup
-				}
-
-				// The data is already structured correctly with key and value
+				// The data should already be structured correctly with key and value
+				// so we just need to set the foreign key to the id of the base model
 				$data[$foreignKey] = $id;
-				$saved = $Model->{$with}->save($data, $options);
+
+				// No need to validate the EAV data again, since it must have passed validation
+				// in afterValidate to have reached here.
+				$saved = $Model->{$with}->save($data, ['validate' => false]);
 			}
 			return true;
 		}
