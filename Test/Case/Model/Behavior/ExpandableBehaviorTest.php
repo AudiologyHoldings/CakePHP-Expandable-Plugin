@@ -28,6 +28,42 @@ class ExpandableUser extends AppModel {
     public $recursive = -1;
 }
 
+/**
+ * UserExpand test Model class
+ */
+class UserExpand extends AppModel {
+    public $name = 'UserExpand';
+    public $belongsTo = ['ExpandableUser'];
+    public $validate = [
+        'key' => [
+            'notblank' => [
+                'rule' => ['notBlank'],
+                'required' => 'create',
+                'allowEmpty' => false,
+                'message' => 'Key must not be blank'
+            ],
+        ],
+    ];
+}
+
+/**
+ * Profile test Model class (for testing nested model validation)
+ */
+class Profile extends AppModel {
+    public $name = 'Profile';
+    public $belongsTo = ['ExpandableUser'];
+    public $validate = [
+        'bio' => [
+            'notblank' => [
+                'rule' => ['notBlank'],
+                'required' => 'create',
+                'allowEmpty' => false,
+                'message' => 'Bio is required'
+            ],
+        ],
+    ];
+}
+
 // This is used to more easily/thoroughly test protected ExpandableBehavior methods
 class TestExpandableBehavior extends ExpandableBehavior
 {
@@ -52,6 +88,7 @@ class ExpandableBehaviorTest extends CakeTestCase {
     public $fixtures = array(
         'plugin.expandable.user',
         'plugin.expandable.user_expand',
+        'plugin.expandable.profile',
     );
 
     /**
@@ -261,5 +298,264 @@ class ExpandableBehaviorTest extends CakeTestCase {
 
         // Restore original settings
         $this->ExpandableUser->Behaviors->TestExpandable->settings[$this->ExpandableUser->alias] = $originalSettings;
+    }
+
+    /**
+     * Test validation when saving with no validation errors in either base model or EAV data
+     *
+     * @return void
+     */
+    public function testSaveWithNoValidationErrors()
+    {
+        // Set up test data with valid base model and EAV fields
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Valid Name',
+                'custom_field' => 'Valid Value'
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['validates', 'save']
+        );
+
+        // Expect validation to be called once with all fields
+        $this->ExpandableUser->UserExpand
+            ->expects($this->once())
+            ->method('validates')
+            ->willReturn(true);
+
+        // Expect save to be called with validate => false
+        $this->ExpandableUser->UserExpand
+            ->expects($this->once())
+            ->method('save')
+            ->with(
+                $this->anything(),
+                $this->equalTo(['validate' => false])
+            )
+            ->willReturn(true);
+
+        // Perform the test
+        $result = $this->ExpandableUser->save($data);
+        $this->assertNotEmpty($result);
+        $this->assertEmpty($this->ExpandableUser->validationErrors);
+    }
+
+    /**
+     * Test validation when saving with base model validation errors and valid EAV field/value
+     *
+     * @return void
+     */
+    public function testSaveWithBaseModelValidationErrors()
+    {
+        // Add a validation rule to the base model
+        $this->ExpandableUser->validate = [
+            'name' => [
+                'rule' => 'notBlank',
+                'message' => 'Name is required'
+            ]
+        ];
+
+        // Set up test data with invalid base model field but valid EAV field
+        $data = [
+            'ExpandableUser' => [
+                'name' => '', // Invalid
+                'custom_field' => 'Valid Value'
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['validates', 'save']
+        );
+
+        // Expect validation to be called even though base model validation failed
+        $this->ExpandableUser->UserExpand
+            ->expects($this->once())
+            ->method('validates')
+            ->willReturn(true);
+
+        // Save should not be called since base model validation failed
+        $this->ExpandableUser->UserExpand
+            ->expects($this->never())
+            ->method('save');
+
+        // Perform the test
+        $result = $this->ExpandableUser->save($data);
+        $this->assertFalse($result);
+        $this->assertEquals(1, count($this->ExpandableUser->validationErrors));
+        $this->assertArrayHasKey('name', $this->ExpandableUser->validationErrors);
+        $this->assertArrayNotHasKey('custom_field', $this->ExpandableUser->validationErrors);
+    }
+
+    /**
+     * Test validation when saving with EAV value field validation errors
+     *
+     * @return void
+     */
+    public function testSaveWithEavValueValidationErrors()
+    {
+        // Set up test data with valid base model field but invalid EAV value
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Valid Name',
+                'custom_field' => '' // Empty value will trigger validation error
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['save']
+        );
+
+        // Set up validation rules for this specific test
+        $this->ExpandableUser->UserExpand->validate = [
+            'key' => [
+                'notblank' => [
+                    'rule' => ['notBlank'],
+                    'required' => 'create',
+                    'allowEmpty' => false,
+                    'message' => 'Key must not be blank'
+                ],
+            ],
+            'value' => [
+                'notblank' => [
+                    'rule' => ['notBlank'],
+                    'required' => 'create',
+                    'allowEmpty' => false,
+                    'message' => 'Value must not be blank'
+                ],
+            ],
+        ];
+
+        // Save should not be called since validation will fail
+        $this->ExpandableUser->UserExpand
+            ->expects($this->never())
+            ->method('save');
+
+        // Perform the test
+        $result = $this->ExpandableUser->save($data);
+        $this->assertFalse($result);
+        $this->assertEquals(1, count($this->ExpandableUser->validationErrors));
+        $this->assertArrayHasKey('custom_field', $this->ExpandableUser->validationErrors);
+        $this->assertEquals(
+            ['Value must not be blank'],
+            $this->ExpandableUser->validationErrors['custom_field']
+        );
+    }
+
+    /**
+     * Test validation when saving with EAV meta field validation errors
+     *
+     * @return void
+     */
+    public function testSaveWithEavMetaValidationErrors()
+    {
+        // Set up test data with valid base model field but invalid EAV key
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Valid Name',
+                '' => 'Valid Value' // Empty key should trigger meta validation error
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['save']
+        );
+
+        // Save should not be called since validation failed
+        $this->ExpandableUser->UserExpand
+            ->expects($this->never())
+            ->method('save');
+
+        // Perform the test
+        $result = $this->ExpandableUser->save($data);
+        $this->assertFalse($result);
+        $this->assertEquals(1, count($this->ExpandableUser->validationErrors));
+        $this->assertArrayHasKey('_system', $this->ExpandableUser->validationErrors);
+        $this->assertEquals(
+            ['An unexpected error occurred. Please contact support if this persists.'],
+            $this->ExpandableUser->validationErrors['_system']
+        );
+    }
+
+    /**
+     * Test validation when saving with both base model and EAV value/meta data validation errors
+     *
+     * @return void
+     */
+    public function testSaveWithBothValidationErrors()
+    {
+        // Set up validation rule for the base model
+        $this->ExpandableUser->validate = [
+            'name' => [
+                'rule' => 'notBlank',
+                'message' => 'Name is required'
+            ]
+        ];
+
+        // Set up test data with invalid base model and EAV fields
+        $data = [
+            'ExpandableUser' => [
+                'name' => '', // Invalid
+                'custom_field' => '', // Invalid
+                '' => 'Valid Value' // Invalid
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['save']
+        );
+
+        // Set up EAV model's validation rules for this test
+        $this->ExpandableUser->UserExpand->validate = [
+            'key' => [
+                'notblank' => [
+                    'rule' => ['notBlank'],
+                    'required' => 'create',
+                    'allowEmpty' => false,
+                    'message' => 'Key must not be blank'
+                ],
+            ],
+            'value' => [
+                'notblank' => [
+                    'rule' => ['notBlank'],
+                    'required' => 'create',
+                    'allowEmpty' => false,
+                    'message' => 'Value must not be blank'
+                ],
+            ],
+        ];
+
+        // Save should not be called since validation failed
+        $this->ExpandableUser->UserExpand
+            ->expects($this->never())
+            ->method('save');
+
+        $result = $this->ExpandableUser->save($data);
+        $this->assertFalse($result);
+        $this->assertEquals(3, count($this->ExpandableUser->validationErrors));
+        $this->assertArrayHasKey('name', $this->ExpandableUser->validationErrors);
+        $this->assertArrayHasKey('custom_field', $this->ExpandableUser->validationErrors);
+        $this->assertEquals(
+            ['Name is required'],
+            $this->ExpandableUser->validationErrors['name']
+        );
+        $this->assertEquals(
+            ['Value must not be blank'],
+            $this->ExpandableUser->validationErrors['custom_field']
+        );
+        $this->assertEquals(
+            ['An unexpected error occurred. Please contact support if this persists.'],
+            $this->ExpandableUser->validationErrors['_system']
+        );
     }
 }
