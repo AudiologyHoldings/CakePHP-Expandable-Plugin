@@ -696,4 +696,92 @@ class ExpandableBehaviorTest extends CakeTestCase {
         $this->assertNotEmpty($this->ExpandableUser->UserExpand->find('first', ['conditions' => ['user_id' => $this->ExpandableUser->id]]));
         $this->assertNotEmpty($this->ExpandableUser->find('first', ['conditions' => ['id' => $this->ExpandableUser->id]]));
     }
+
+    /**
+     * Test that afterSave properly saves EAV data with correct structure and relationships
+     *
+     * @return void
+     */
+    public function testAfterSaveEavData()
+    {
+        // Set up test data with various field types
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Test User',
+                'email' => 'test@example.com',
+                'is_active' => true,
+                'custom_string' => 'string value',
+                'custom_number' => 123,
+                'custom_boolean' => true,
+                'custom_array' => ['one', 'two', 'three'],
+                'custom_object' => ['key' => 'value'],
+                'custom_date' => '2024-01-01'
+            ]
+        ];
+
+        // Save the data
+        $result = $this->ExpandableUser->save($data);
+        $this->assertNotEmpty($result);
+
+        // Verify the base model data was saved
+        $saved = $this->ExpandableUser->find('first', [
+            'contain' => ['UserExpand'],
+            'conditions' => ['ExpandableUser.id' => $this->ExpandableUser->id]
+        ]);
+        $this->assertEquals('Test User', $saved['ExpandableUser']['name']);
+        $this->assertEquals('test@example.com', $saved['ExpandableUser']['email']);
+        $this->assertTrue($saved['ExpandableUser']['is_active']);
+
+        // Verify EAV data was saved with correct structure
+        $this->assertNotEmpty($saved['UserExpand']);
+
+        // Expected EAV data
+        $expectedEav = [
+            'custom_string' => 'string value',
+            'custom_number' => '123',
+            'custom_boolean' => 'true', // Boolean values are stored as "true"/"false" strings
+            'custom_array' => json_encode(['one', 'two', 'three']),
+            'custom_object' => json_encode(['key' => 'value']),
+            'custom_date' => '2024-01-01'
+        ];
+
+        // Verify each EAV record
+        foreach ($saved['UserExpand'] as $eav) {
+            $this->assertArrayHasKey('key', $eav);
+            $this->assertArrayHasKey('value', $eav);
+            $this->assertArrayHasKey('user_id', $eav);
+            $this->assertEquals($this->ExpandableUser->id, $eav['user_id']);
+
+            // Verify the value matches what we expect
+            $this->assertArrayHasKey($eav['key'], $expectedEav);
+            $this->assertEquals($expectedEav[$eav['key']], $eav['value']);
+        }
+
+        // Test updating existing EAV data
+        $updateData = [
+            'ExpandableUser' => [
+                'id' => $this->ExpandableUser->id,
+                'custom_string' => 'updated value',
+                'custom_number' => 456
+            ]
+        ];
+
+        $result = $this->ExpandableUser->save($updateData);
+        $this->assertNotEmpty($result);
+
+        // Find the updated record
+        $updated = $this->ExpandableUser->find('first', [
+            'contain' => ['UserExpand'],
+            'conditions' => ['ExpandableUser.id' => $this->ExpandableUser->id]
+        ]);
+
+        // Verify the EAV data was updated
+        foreach ($updated['UserExpand'] as $eav) {
+            if ($eav['key'] === 'custom_string') {
+                $this->assertEquals('updated value', $eav['value']);
+            } elseif ($eav['key'] === 'custom_number') {
+                $this->assertEquals('456', $eav['value']);
+            }
+        }
+    }
 }
