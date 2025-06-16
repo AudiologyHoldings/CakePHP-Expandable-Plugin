@@ -180,55 +180,29 @@ class ExpandableBehavior extends ModelBehavior {
 
 		$with = $this->settings[$Model->alias]['with'];
 		$expandableErrors = []; // Errors that result from the EAV value field
-		$metaErrors = []; // Errors that result from EAV non-value fields (i.e. key, id, etc.)
-
 		foreach ($this->_eavData as $data) {
 			$Model->{$with}->create();
 			$Model->{$with}->set($data);
 
-			// Validate all fields
-			if (!$Model->{$with}->validates()) {
-				foreach ($Model->{$with}->validationErrors as $field => $errorMessages) {
-					if ($field === 'value') {
-						// Value field errors appear as virtual columns on the base model
-						$expandableErrors[$data['key']] = $errorMessages;
-					} else {
-						// Meta field errors are collected separately
-						$metaErrors[$data['key']][$field] = $errorMessages;
-					}
-				}
+			// We are only validating the 'value' field here due to validation messaging on
+			// other fields potentially causing confusion for end users, and also to
+			// better simulate the typical validation messaging that would be seen if the
+			// Expandable field was an actual field on the base model.
+			if (!$Model->{$with}->validates(['fieldList' => ['value']])) {
+				// Since we're only validating the value field, we can directly access its errors
+				$expandableErrors[$data['key']] = $Model->{$with}->validationErrors['value'];
 			}
 
-			// Clean up the model state
-			$Model->{$with}->create();
+			// Restore the EAV model state
 			$Model->{$with}->validationErrors = [];
 			$Model->{$with}->invalidFields = [];
 		}
+		$Model->{$with}->create();
 
 		// If we have any errors, we need to handle them
-		if (!empty($expandableErrors) || !empty($metaErrors)) {
-			// Merge virtual column errors with base model errors
-			if (!empty($expandableErrors)) {
-				$Model->validationErrors = $Model->validationErrors ?? [];
-				$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
-			}
-
-			// Log meta errors for debugging/administration
-			if (!empty($metaErrors)) {
-				AppLog::error(
-					sprintf(
-						'ExpandableBehavior meta validation errors for %s: %s',
-						$Model->alias,
-						json_encode($metaErrors)
-					),
-					['context' => 'expandable']
-				);
-
-				// Add a generic error message for the user
-				$Model->validationErrors['_system'] = [
-					'An unexpected error occurred. Please contact support if this persists.'
-				];
-			}
+		if (!empty($expandableErrors)) {
+			$Model->validationErrors = $Model->validationErrors ?? [];
+			$Model->validationErrors = array_merge($Model->validationErrors, $expandableErrors);
 			return false;
 		}
 		return true;
