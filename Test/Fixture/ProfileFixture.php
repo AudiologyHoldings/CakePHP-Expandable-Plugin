@@ -5,7 +5,7 @@
 class ProfileFixture extends CakeTestFixture {
     public $fields = [
         'id' => ['type' => 'integer', 'null' => false, 'default' => null, 'key' => 'primary'],
-        'expandable_user_id' => ['type' => 'integer', 'null' => false, 'default' => null],
+        'user_id' => ['type' => 'string', 'null' => false, 'default' => null],
         'bio' => ['type' => 'text', 'null' => true, 'default' => null],
         'created' => ['type' => 'datetime', 'null' => true, 'default' => null],
         'modified' => ['type' => 'datetime', 'null' => true, 'default' => null],
@@ -17,7 +17,7 @@ class ProfileFixture extends CakeTestFixture {
     public $records = [
         [
             'id' => 1,
-            'expandable_user_id' => 1,
+            'user_id' => 'abcd-1234-efgh-5678-ijkl',
             'bio' => 'Test bio for user 1',
             'created' => '2024-01-01 00:00:00',
             'modified' => '2024-01-01 00:00:00'

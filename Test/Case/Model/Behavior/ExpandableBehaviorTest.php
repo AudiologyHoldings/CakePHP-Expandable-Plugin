@@ -92,6 +92,13 @@ class ExpandableBehaviorTest extends CakeTestCase {
     );
 
     /**
+     * The ExpandableUser model instance
+     *
+     * @var ExpandableUser
+     */
+    public $ExpandableUser;
+
+    /**
      * Method executed before each test
      *
      */
@@ -557,5 +564,136 @@ class ExpandableBehaviorTest extends CakeTestCase {
             ['An unexpected error occurred. Please contact support if this persists.'],
             $this->ExpandableUser->validationErrors['_system']
         );
+    }
+
+    /**
+     * Test validation when saving with multiple EAV fields having validation errors
+     *
+     * @return void
+     */
+    public function testSaveWithMultipleEavValidationErrors()
+    {
+        // Set up test data with multiple invalid EAV fields
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Valid Name',
+                'custom_field1' => '', // Invalid
+                'custom_field2' => '' // Invalid
+            ]
+        ];
+
+        // Mock UserExpand model
+        $this->ExpandableUser->UserExpand = $this->getMockForModel(
+            'Expandable.UserExpand',
+            ['validates', 'save']
+        );
+
+        // Counter to track validation calls
+        $validationCount = 0;
+
+        // Expect validation to be called for each field
+        $this->ExpandableUser->UserExpand
+            ->expects($this->exactly(2))
+            ->method('validates')
+            ->will($this->returnCallback(function() use (&$validationCount) {
+                $validationCount++;
+                $this->ExpandableUser->UserExpand->validationErrors = [
+                    'value' => ['Value must not be blank']
+                ];
+                return false;
+            }));
+
+        // Save should not be called since validation failed
+        $this->ExpandableUser->UserExpand
+            ->expects($this->never())
+            ->method('save');
+
+        $result = $this->ExpandableUser->save($data);
+        $this->assertFalse($result);
+        $this->assertArrayHasKey('custom_field1', $this->ExpandableUser->validationErrors);
+        $this->assertArrayHasKey('custom_field2', $this->ExpandableUser->validationErrors);
+        $this->assertEquals(
+            ['Value must not be blank'],
+            $this->ExpandableUser->validationErrors['custom_field1']
+        );
+        $this->assertEquals(
+            ['Value must not be blank'],
+            $this->ExpandableUser->validationErrors['custom_field2']
+        );
+    }
+
+    /**
+     * Test validation when saving with nested model validation errors
+     *
+     * @return void
+     */
+    public function testSaveWithNestedModelValidationErrors()
+    {
+        // Set up belongsTo relationship
+        $this->ExpandableUser->hasOne = [
+            'Profile' => [
+                'className' => 'Profile',
+                'foreignKey' => 'user_id',
+            ]
+        ];
+
+        // Mock Profile model to track save attempts
+        $this->ExpandableUser->Profile = ClassRegistry::init('Expandable.Profile');
+        $this->ExpandableUser->Profile->bindModel([
+            'belongsTo' => [
+                'ExpandableUser' => [
+                    'className' => 'Expandable.ExpandableUser',
+                    'foreignKey' => 'user_id'
+                ]
+            ]
+        ]);
+
+        // Set up test data with valid base model and EAV fields, but invalid nested model data
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Test Valid Name',
+                'login' => 'test_user_1',
+                'custom_field' => 'Valid Value',
+            ],
+            'Profile' => [
+                'bio' => '' // Empty bio should trigger notBlank validation error
+            ]
+        ];
+
+        // Test that the data is not saved
+        $result = $this->ExpandableUser->saveAssociated($data, [
+            'validate' => true,
+            'deep' => true,
+            'atomic' => true
+        ]);
+        $this->assertFalse($result);
+        $this->assertArrayHasKey('bio', $this->ExpandableUser->Profile->validationErrors);
+        $this->assertArrayNotHasKey('custom_field', $this->ExpandableUser->validationErrors);
+        $this->assertNotEmpty($this->ExpandableUser->find('first', ['conditions' => ['id' => $this->ExpandableUser->id]]));
+        $this->assertEmpty($this->ExpandableUser->Profile->find('first', ['conditions' => ['user_id' => $this->ExpandableUser->id]]));
+        $this->assertEmpty($this->ExpandableUser->UserExpand->find('first', ['conditions' => ['user_id' => $this->ExpandableUser->id]]));
+
+        // Test that the data is saved
+        $data = [
+            'ExpandableUser' => [
+                'name' => 'Test Valid Name 2',
+                'email' => 'test2@example.com',
+                'is_active' => true,
+                'custom_field' => 'Valid Value',
+            ],
+            'Profile' => [
+                'bio' => 'Valid Bio'
+            ]
+        ];
+        $this->ExpandableUser->create(); // Create a new record
+        $result = $this->ExpandableUser->saveAssociated($data, [
+            'validate' => true,
+            'deep' => true,
+            'atomic' => true
+        ]);
+        $this->assertNotEmpty($result);
+        $this->assertNotEmpty($this->ExpandableUser->Profile->find('first', ['conditions' => ['user_id' => $this->ExpandableUser->id]]));
+        $this->assertNotEmpty($this->ExpandableUser->UserExpand->find('first', ['conditions' => ['user_id' => $this->ExpandableUser->id]]));
+        $this->assertNotEmpty($this->ExpandableUser->find('first', ['conditions' => ['id' => $this->ExpandableUser->id]]));
     }
 }
