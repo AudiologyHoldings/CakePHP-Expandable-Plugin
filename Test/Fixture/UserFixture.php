@@ -17,6 +17,8 @@ class UserFixture extends CakeTestFixture {
 		'created' => array('type' => 'datetime', 'null' => true, 'default' => null),
 		'modified' => array('type' => 'datetime', 'null' => true, 'default' => null),
 		'is_active' => array('type' => 'boolean', 'null' => false, 'default' => '0', 'key' => 'index'),
+        'profile_id' => array('type' => 'integer', 'null' => false, 'default' => 0, 'unsigned' => false),
+        'comment_id' => array('type' => 'integer', 'null' => false, 'default' => 0, 'unsigned' => false),
 		'indexes' => array(
 			'PRIMARY' => array('column' => 'id', 'unique' => 1),
 			'login' => array('column' => array('is_active', 'email'), 'unique' => 1)
